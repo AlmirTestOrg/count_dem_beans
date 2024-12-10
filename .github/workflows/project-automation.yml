@@ -1,7 +1,7 @@
 name: Project Board Automation
 
 on:
-  projects_v2_item:
+  project_v2_item:
     types: [edited]
   pull_request:
     types: [review_requested, review_submitted]
@@ -21,7 +21,7 @@ jobs:
 
       - name: Handle move to In Progress
         if: |
-          github.event_name == 'projects_v2_item' &&
+          github.event_name == 'project_v2_item' &&
           github.event.changes.field_value.field_node_id == vars.STATUS_FIELD_ID &&
           github.event.changes.field_value.after == vars.STATUS_IN_PROGRESS
         env:
