@@ -1,8 +1,8 @@
 name: Project Board Automation
 
 on:
-  project_card:
-    types: [moved]
+  projects_v2_item:
+    types: [edited]
   pull_request:
     types: [review_requested, review_submitted]
 
@@ -19,11 +19,13 @@ jobs:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PEM }}
 
-      - name: Handle card moved to In Progress
-        if: github.event_name == 'project_card' && github.event.changes.column_id.to == 'In Progress'
+      - name: Handle move to In Progress
+        if: |
+          github.event_name == 'projects_v2_item' &&
+          github.event.changes.field_value.field_node_id == vars.STATUS_FIELD_ID &&
+          github.event.changes.field_value.after == vars.STATUS_IN_PROGRESS
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          ISSUE_ID: ${{ github.event.project_card.content_id }}
         run: |
           # Assign issue to current user
           gh api graphql -f query='
