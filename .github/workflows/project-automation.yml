@@ -2,11 +2,19 @@ name: Project Board Automation
 
 on:
   issues:
-    types: [edited]
+    types: [edited, labeled, unlabeled]
   pull_request:
     types: [review_requested, review_submitted]
 
 jobs:
+  debug_event:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJSON(github) }}
+        run: echo "$GITHUB_CONTEXT"
+
   handle_project_automation:
     runs-on: ubuntu-latest
     steps:
@@ -18,6 +26,12 @@ jobs:
         with:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PEM }}
+
+      - name: Debug variables
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Event action: ${{ github.event.action }}"
+          echo "Changes: ${{ toJSON(github.event.changes) }}"
 
       - name: Handle move to In Progress
         if: |
