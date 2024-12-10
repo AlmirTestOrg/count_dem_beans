@@ -1,0 +1,104 @@
+name: Project Board Automation
+
+on:
+  project_card:
+    types: [moved]
+  pull_request:
+    types: [review_requested, review_submitted]
+
+jobs:
+  handle_project_automation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PEM }}
+
+      - name: Handle card moved to In Progress
+        if: github.event_name == 'project_card' && github.event.changes.column_id.to == 'In Progress'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          ISSUE_ID: ${{ github.event.project_card.content_id }}
+        run: |
+          # Assign issue to current user
+          gh api graphql -f query='
+            mutation($issueId:ID!, $userId:ID!) {
+              updateIssue(input: {id:$issueId, assigneeIds:[$userId]}) {
+                issue { id }
+              }
+            }' -f issueId=$ISSUE_ID -f userId=${{ github.actor }}
+
+          # Set start date to today
+          echo "DATE=$(date +"%Y-%m-%d")" >> $GITHUB_ENV
+          gh api graphql -f query='
+            mutation($issueId:ID!, $date:Date!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: "${{ vars.PROJECT_ID }}"
+                itemId: $ISSUE_ID
+                fieldId: "${{ vars.START_DATE_FIELD_ID }}"
+                value: { date: $date }
+              }) {
+                projectV2Item { id }
+              }
+            }' -f issueId=$ISSUE_ID -f date=${{ env.DATE }}
+
+          # Create branch
+          ISSUE_NUMBER=$(gh api graphql -f query='
+            query($issueId:ID!) {
+              node(id:$issueId) { number }
+            }' -f issueId=$ISSUE_ID --jq '.data.node.number')
+
+          BRANCH_NAME="issue-${ISSUE_NUMBER}"
+          git checkout -b $BRANCH_NAME
+          git push origin $BRANCH_NAME
+
+      - name: Handle PR review requested
+        if: |
+          github.event_name == 'pull_request' &&
+          github.event.action == 'review_requested' &&
+          github.event.pull_request.draft == false
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          # Check if all checks passed
+          checks_status=$(gh api \
+            repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs \
+            --jq '.check_runs[].conclusion' | sort -u)
+
+          if [[ "$checks_status" == "success" ]]; then
+            gh api graphql -f query='
+              mutation {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: "${{ vars.PROJECT_ID }}"
+                  itemId: "${{ github.event.pull_request.node_id }}"
+                  fieldId: "${{ vars.STATUS_FIELD_ID }}"
+                  value: { singleSelectOptionId: "${{ vars.STATUS_IN_REVIEW }}" }
+                }) {
+                  projectV2Item { id }
+                }
+              }'
+          fi
+
+      - name: Handle changes requested
+        if: |
+          github.event_name == 'pull_request' &&
+          github.event.review.state == 'changes_requested'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh api graphql -f query='
+            mutation {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: "${{ vars.PROJECT_ID }}"
+                itemId: "${{ github.event.pull_request.node_id }}"
+                fieldId: "${{ vars.STATUS_FIELD_ID }}"
+                value: { singleSelectOptionId: "${{ vars.STATUS_IN_PROGRESS }}" }
+              }) {
+                projectV2Item { id }
+              }
+            }'
